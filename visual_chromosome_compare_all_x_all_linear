@@ -1,0 +1,1077 @@
+#!/usr/bin/perl
+
+
+use lib '/home/wicker/data/WICKERsoft/';
+use Tk;
+use Biomodule;
+
+if (@ARGV <1) {
+	print "1.= reference chromosome (query for outputs from blast_compare_align_chromosome)\n";
+	print "2.= gff (optional)\n";
+	print "3.= centromere positions (optional)\n";
+	exit;
+	}
+
+$chr_len = $ARGV[1];
+
+
+# +++++++++++++++++ PART I +++++++++++++++++++++++++++
+# this part defines the visual layout
+# this is all Tk specific stuff 
+
+
+
+# determine screen resolution +++++++++++++++++++++++++++++++++++
+`xrandr > resolution_table`;
+open (IN,"resolution_table");
+$line = <IN>;
+close(IN);
+`rm resolution_table`;
+
+
+($x_axis,$y_axis) = ($line =~ /current\s+(\d+)\s+x\s+(\d+),/);
+
+# use info to create main window +++++++++++++++++++++++++++++++++
+
+$x_frame = $x_axis-10;
+
+if ($x_frame > 2000) {
+	$x_frame /=2;
+	}
+$y_frame = $y_axis-70;
+
+# hard code size in case of bad dimension recognition
+if (($ARGV[1] eq '-h') || ($ARGV[2] eq '-h') || ($ARGV[3] eq '-h')) {
+        $x_frame = 1900;
+        $y_frame = 900;
+        }
+
+
+# create functional geometry variable
+$tempfr = "$x_frame x";
+$tempfr =~ s/ //;
+$geometry = "$tempfr$y_frame+10+0";
+print "geometry = $geometry\n";
+
+$mw = MainWindow -> new;
+$mw -> title ("WICKERsoft supersoftware");
+$mw -> geometry("$geometry");
+$buty = $y_frame-90;
+$canvas_x = $x_frame-40;
+
+
+# create canvas ++++++++++++++++++++++++++++++++++++
+
+$canvas = $mw -> Scrolled ('Canvas',
+        -scrollbars, 'se',
+        -width, $canvas_x,
+        -height, ($buty - 30),
+        -background, 'white',
+        ) -> place(-x => 10, -y => 10,);
+
+# loop to create buttons +++++++++++++++++++++++++++++
+
+# define arrays with labels and functions for buttons
+
+@buttons = ("process_file", "print", "exit", "write postscript");
+
+@b_comands = ("get_file", "print_landscape", "get_out", "write_ps");
+
+$b_count =0;
+$butx = 10;
+
+foreach (@buttons) {
+
+	$b_command = $b_comands[$b_count];
+	$b_text = $buttons[$b_count];
+
+	$mw -> Button (
+	        -text, "$b_text",
+	        -width, 17,
+		-pady, '-1',
+		-padx, '2',
+		# this exact format for the "-command" is obviously important:
+	        -command, \&$b_command
+	        ) -> place (-x => $butx, -y => $buty);
+
+	$b_count++;
+	$butx +=130;
+	&max_button;
+
+	} # end create buttons -------------------------
+
+
+
+
+# checks if buttons have to be moved to a new line
+
+sub max_button {
+if ($butx > ($x_frame-250)) {
+	$butx = 10;
+	$buty +=25;
+	}
+} # end max_button
+
+
+# loop to create check buttons ++++++++++++++++++++++++++++++++++++++++
+
+$butx +=20;
+&max_button;
+
+#@checkbutton = ("draw scale", "sequence heat map", "relative cvg");
+@cb_commands = qw(sqrt_color simple show_sim outgroups);
+
+$show_breaks = 0;
+for ($b=0;$b<@cb_commands;$b++) {
+
+	$cb_command = $cb_commands[$b];
+	$cb_text = $cb_commands[$b];
+
+	$$cb_command=1;
+
+	if ($b>1){
+		$$cb_command=0;
+		}
+
+	$mw -> Checkbutton (
+		-text, "$cb_text",
+		-variable, \$$cb_command,
+		) -> place(-x => ($butx), -y => ($buty));
+	
+	$butx +=180;
+	&max_button;
+	} # end create ckeck buttons ----------------------------------
+
+
+
+# loop to create data entries +++++++++++++++++++++++++++++++++++++++++++
+
+@entry = qw(ps_name color_scale window x_zoom fract max_delta chr_dist ratio_cut plot_zoom);
+
+$plot_zoom = 20;
+$color_scale = 50;
+$max_delta = 100000;
+$window = 50;
+$x_zoom = 15000;
+$y_zoom = 20000;
+$fract = 5;
+$scale_unit = 1;
+$chr_dist = 30;
+$scale_step = 0.2;
+$identity_cut = 99.95;
+$ratio_cut = 10;
+
+$ps_name = "conservation_$ARGV[0]";
+$ps_name =~ s/log_chr_comp_//;
+$ps_name =~ s/.tab//;
+
+
+for ($b=0;$b<@entry;$b++) {
+	
+	$label = $entry[$b];
+	$entry = $entry[$b];
+
+	$mw -> Label (
+		-text, "$label",
+		-width, 11,
+		) -> place (-x => ($butx+20), -y => $buty+5);
+
+	$mw -> Entry (
+		-textvariable, \$$entry,
+		-relief, 'sunken',
+		-background, 'white',
+		-width => 11, 
+		) -> place(-x => ($butx+100), -y => ($buty+3));
+
+	$butx +=150;
+	&max_button;
+	} # end create data entries --------------------------------------
+
+
+MainLoop;
+
+# +++++++++++++ PART II +++++++++++++++++++++++++++++++++
+# subroutines that are called by the buttons 
+
+
+# command routines for generic buttons ++++++++++++++++++
+
+sub get_out {
+	exit;
+	}
+
+sub get_file {
+&display;
+}
+
+sub zoom_in {
+$zoom = int($zoom/2);
+&display;
+}
+
+sub zoom_out {
+$zoom = int($zoom*2.5);
+&display;
+}
+
+
+
+# +++++++++++ main subroutine - display annotation ++++++++++++++++++++++++
+
+sub display {
+
+$canvas -> delete("all");
+
+
+# define base positions
+$y_base = 50;
+$x_base = 80;
+$font = "{arial 12}";
+$count_file =0;
+
+&mk_color_spec;
+&mk_heat;
+
+# get names and sizes of all chromosomes from logs
+%len = ();
+@chr = ();
+%iso = ();
+
+# get name of reference (the one that all others were aligned to, first name in log files)
+$ref_chr = $ARGV[0];
+$ref_chr =~ s/log_chr_comp_//;
+
+foreach $file (<*$ARGV[0]*.tab>) {
+
+	print "process $file\n";
+
+	open (IN,"$file");
+	TAB:while (<IN>) {
+		($c1,$l1,$c2,$l2) = /CHR1=(\S+)\s+LEN1=(\d+)\s+CHR2=(\S+)\s+LEN2=(\d+)/;
+		if ($c1) {
+			($iso1) = ($c1 =~ /^[^_]+_(\S+)_chr/);
+			($iso2) = ($c2 =~ /^[^_]+_(\S+)_chr/);
+
+			unless ($c1 ~~ @chr) {
+				push(@chr,$c1);
+				$len{$c1} = $l1;
+				$iso{$c1} = $iso1;
+				}
+
+			unless ($c2 ~~ @chr) {
+                                push(@chr,$c2);
+                                $len{$c2} = $l2;
+				$iso{$c2} = $iso2;
+                                }
+			last TAB;	
+			}
+
+		}
+	close(IN);	
+	}
+
+# show chromosomes, define in and outgroups
+#@out = qw(1451 ISR211 THUN12);
+#$out = " 1451 ISR211 THUN12 ";
+
+@out = qw(1451 ISR211);
+$out = " 1451 ISR211 ";
+
+@out = qw(1451);
+$out = " 1451 ";
+
+@null = qw(ISR211);
+$null = " ISR211 ";
+
+if ($outgroups ==1) {
+	@out = qw(ISR211);
+	$out = " ISR211 ";
+
+	@null = qw(1451);
+	$null = " 1451 ";
+	}
+
+# determine size of dataset (in or outgroup)
+$max_cvg_out = @out;
+$max_cvg_in = 8;
+
+
+%group = ();
+
+print "\nIdentfied chromosomes:\n";
+
+foreach $chr (@chr) {
+	$len = $len{$chr};
+	$iso = $iso{$chr};
+	if ($out =~ / $iso /) {
+		$group{$iso} = "OUT";
+		} 
+	elsif ($null =~ / $iso /){ 
+		$group{$iso} = "NULL";
+                } else {
+		$group{$iso} = "IN";
+		}	
+	print "$len\t$group{$iso}\t$iso\t\t$chr\n";
+	}
+
+
+# get length of refence chromosome
+# ... exit if there is no clear ref_chr
+$len_ref = $len{$ref_chr};
+if ($len_ref < 10000) {
+	print "\nERROR: query must be single chromosome\n\n";
+	exit;
+	} else {
+	print "\nREF OK: $ref_chr $len_ref bp\n";	
+	}
+
+
+
+# initiate cumulative sequence diversity array in kb of ref_chr for in and outgroups
+@divg_in = ();
+@divg_out = ();
+for($i=0;$i<$len_ref;$i+=1000) {
+	$kb = int($i/1000);
+	$divg_in[$kb][0] = 0; # for total SNPs
+	$divg_in[$kb][1] = 0; # for cvg
+	$divg_out[$kb][0] = 0; # for total SNPs
+        $divg_out[$kb][1] = 0; # for cvg
+	}
+
+#Initiate 2D diversity table in kb windows 
+# loop over positions
+@div = ();
+
+# loop over length
+for($i=0;$i<$len_ref;$i+=1000) {
+	$kb = int($i/1000);
+
+	# initiate coverage field and add group flag
+	for($j=0;$j<@chr;$j++) {
+		$chr = $chr[$j];
+		$iso = $iso{$chr};
+		$group = $group{$iso};
+	       	$div[$i][$j][0] = "NA";
+		$div[$i][$j][1] = $group;	
+		}
+	}
+
+
+
+
+# if ther is a gff, get genes from chromosome ++++++++++++++
+($chr_num) = ($ref_chr =~ /chr(\d+)/);
+@gff = ();
+%gff = ();
+open(GFF,"$ARGV[1]");
+while (<GFF>) {
+	($be,$id,$de) = /^\S+-$chr_num\s+.+gene\s+(\d+)\s.+ID=([^;]+);.+DE=(\S.+)/;
+	if ($be) {
+		push(@gff,$id);
+		($fam) = ($de =~ /family=(E\d+)/);
+		$fam{$id} = $fam;
+		$gene_pos{$id} = $be;
+		#print "$id\t$be\t$fam\n";
+		}
+	}
+close(GFF);
+
+$gene_num = @gff;
+
+print "chr $chr_num genes: $gene_num\n";
+
+
+# get centromere positions, if available ++++++++++++++++++
+open(CEN,"$ARGV[2]");
+while (<CEN>) {
+        ($chr,$be,$en) = /^($ref_chr)\s+(\S+)-(\S+)/;
+        if ($be) {
+		$cent_be = $be*1000000;
+		$cent_en = $en*1000000;
+		print "centromere $chr\t$cent_be-$cent_en\n";
+                }
+        }
+close(CEN);
+
+
+
+
+# loop over files
+$count_file = 0;
+
+foreach $file (<*$ARGV[0]*.tab>) {
+
+        print "process $file\n";
+	$first = 1;
+	@all = ();
+	$count_all = 0;
+	$count = 0;
+	$count_file++;
+
+        open (IN,"$file");
+        TAB:while (<IN>) {
+
+
+		# get chromosome and isolate names
+                ($c1,$c2) = /CHR1=(\S+)\s+LEN1=\d+\s+CHR2=(\S+)\s+LEN2=(\d+)/;
+                if (($c1) && ($first ==1)) {
+			$chr1 = $c1;
+			$chr2 = $c2;
+
+			$iso1 = $iso{$chr1};
+			$iso2 = $iso{$chr2};
+
+			# determine in or outgroup
+			$group = $group{$iso2};
+
+			# make label
+			$x1 = $x_base-20;
+			$lab = "$chr2";
+			$y1 = $y_base+$count_file*$chr_dist;
+			$y2 = $y1+int($chr_dist*0.7);
+			&TkText($x1,$y1,$lab,'ne','black',$font);
+
+			}
+		
+		# get pair data	++++++++++++++++++++++++++
+		($p1) = /^(\S.+)/;
+        	if (($p1) && ($first ==0)) {
+
+                	$count_all++;
+
+                	@data = split('\t',$p1);
+
+                	($chr) = ($data[0] =~ /^(\S+chr\S+)_X_/);
+
+                	# only keep entries that are part of colinear regions
+			# i.e. region of consecutive hits with similar distances
+
+			# distance to previous hit
+			$delta1 = abs($pos_old1-$data[1]);
+			$delta2 = abs($pos_old2-$data[2]);
+
+			# where positions dont differ by >50%
+                	$abs_dist = abs($data[1]-$data[2]);
+                	if ($data[1] > 0) {
+                	        $rel_dist = $abs_dist/$data[1];
+				#$rel_dist = $abs_dist/$len_ref;
+                	        } else {
+                	        $rel_dist = 100;
+				#print "WARNING: $count\t$data[1]-$data[2]\n";
+                	        }
+
+			# compensate for large relative distances at start of chromosome
+			if (($data[1] < 1000000) && ($data[2] < 1000000)) {
+				$rel_dist = 0.1;
+				}
+
+                	# select values when difference between previous hits are small
+			# ... and pos1 and pos2 are not too far apart on the chromosomes
+			#if (($delta1 < $max_delta) && ($delta2 < $max_delta) && ($rel_dist <= 0.2)) {
+			if (($delta1 < $max_delta) && ($delta2 < $max_delta) && ($rel_dist < 0.5)) {
+                	        $all[$count][0] = $data[1]; # pos chr 1
+                	        $all[$count][1] = $data[2]; # pos chr 2
+                	        $all[$count][2] = $data[6]; # aligned bp        
+                	        $all[$count][3] = $data[7]; # TI
+                	        $all[$count][4] = $data[8]; # TV
+                	        $count++;
+
+				#if ($chr2 =~ /Bgs/) {
+				 	#print "KEEP\t$chr1\t$pos_old1\t-> $data[1]\n";
+				#	}
+                	        } else {
+					#print "JUMP\t$chr1\t$pos_old1\t-> $data[1]\t$chr2\t$pos_old2t-> $data[2]\n";
+				#print "DISCARD: $data[1]\t$data[2]\t$data[6]\t$data[7]\t$data[8]\n";
+                	        }
+
+			$pos_old1 = $data[1];
+		       	$pos_old2 = $data[2];	
+
+			if ($count > 5000) {
+				#	last TAB;
+				}
+                	}
+
+		$first = 0;
+
+                }
+        close(IN);
+
+	&display_chr;
+
+        }
+
+
+
+# make track for genes at the top
+foreach $gene (@gff) {
+
+        $gene_pos = $gene_pos{$gene};
+        $fam = $fam{$gene};
+
+	$x1 = $x_base+int($gene_pos/$x_zoom);
+	$y1 = $y_base;
+	$y2 = $y1+5;
+
+	$fill = "gray70";
+	if ($fam ne '') {
+		$fill = "red";
+		$y1+=5;
+		$y2 = $y1+5;
+		}
+
+	&TkLine($x1,$y1,$x1,$y2,$fill);	
+        }
+
+# show centromere if available
+print "centromere: $cent_be-$cent_en\t$x1-$x2\n\n";
+if ($cent_be) {
+        $x1 = $x_base+int($cent_be/$x_zoom);
+        $x2 = $x_base+int($cent_en/$x_zoom);
+        $y1 = $y_base+15;
+        $y2 = $y1-3;
+        $fill = "gray70";
+        &TkBox($x1,$y1,$x2,$y2,$fill,$fill);
+        print "centromere: $x1-$x2\n";
+        }
+
+
+
+
+# ... and Mb scale
+$scale_step = 1000000;
+for($i=0;$i<$len_ref;$i+=$scale_step) {
+	$mb = int($i/$scale_step);
+	$x1 = $x_base+int($i/$x_zoom);
+	$y1 = $y_base;
+	$y2 = $y1-5;
+	&TkLine($x1,$y1,$x1,$y2);
+	&TkText($x1,$y2-3,$mb,'s');
+
+	}
+
+
+
+# make track at the bottom for cumulative date
+
+$x_old_in = $x_base;
+$x_old_out = $x_base;
+
+$y_old_in = "NA";
+$y_old_out = "NA";
+
+# for ratio plot
+$x_old = $x_base; 
+$y_old = "NA";
+
+# keep count of data points for wich in and outgroup data is available
+$count_info =0;
+
+@gene_collect = ();
+$gene_DE = '';
+
+for($i=0;$i<$len_ref;$i+=1000) {
+        $kb = int($i/1000);
+        $div_in = $divg_in[$kb][0];
+	$cvg_in = $divg_in[$kb][1];
+
+	$div_out = $divg_out[$kb][0];
+	$cvg_out = $divg_out[$kb][1];
+	$ctl_out = $divg_out[$kb][2]; # just fo ctl
+
+	#print "$chr\t$i\t$div_in\t$cvg_in\t$div_out\t$cvg_out\t$max_cvg_out ***\n";
+
+	# calc avg diversity in-group
+	if ($cvg_in > 0) {
+		$avg_div_in = $div_in/$cvg_in;
+		$avg_div_in = sprintf("%.03f",$avg_div_in);
+		} else {
+		$avg_div_in = "NA";
+		}
+
+	# calc avg diversity out-group
+        if ($cvg_out > 0) {
+                $avg_div_out = $div_out/$cvg_out;
+                $avg_div_out = sprintf("%.03f",$avg_div_out);
+                } else {
+		$avg_div_out = "NA";
+                }
+
+	if ($avg_div_out > 1) {
+#		$avg_div_out =1;
+		}
+
+
+        # plot values for outgroup, if there is no missing data
+        if ($cvg_out == $max_cvg_out) {
+
+		$sim = 100-$avg_div_out;
+                $inv = 1-$avg_div_out;
+
+                $x1_out = $x_base+ int($i/$x_zoom);
+                $y1_out = $y_base+($count_file+2)*$chr_dist+$plot_zoom*$avg_div_out;
+
+		$fill = "gray60";
+
+		# show divg levels as dots
+		$x2 = $x1_out+1;
+		$y2 = $y1_out+1;
+		&TkBox($x1_out,$y1_out,$x2,$y2,$fill,$fill);
+
+                }
+
+
+
+	# plot values for in group, if there is no missing data
+	if ($cvg_in == $max_cvg_in) {
+
+		$val = int($avg_div_in*$color_scale);
+		if ($sqrt_color ==1) {
+			$val = (sqrt($avg_div_in))*2*$color_scale;
+			$val = int($val);
+			}
+		if ($val > 38) {
+        		$val = 38;
+        	        }
+		$fill = $heat[$val];
+
+		$inv = 1-$avg_div_in;
+
+		$x1_in = $x_base+ int($i/$x_zoom);
+		$y1_in = $y_base+($count_file+2)*$chr_dist+$plot_zoom*$avg_div_in;
+
+		# show divg levels as dots
+		$fill = "red";
+                $x2 = $x1_in+1;
+                $y2 = $y1_in+1;
+                &TkBox($x1_in,$y1_in,$x2,$y2,$fill,$fill);
+
+		}
+
+
+	# make ratio
+	if (($cvg_out == $max_cvg_out) && ($cvg_in == $max_cvg_in)) {
+
+		$ratio = $avg_div_out/$avg_div_in; 
+		$x1 = $x_base+ int($i/$x_zoom);
+		$x2 = $x1+1;
+                $y1 = $y_base+($count_file+13)*$chr_dist-3*$ratio;
+		$y2 = $y1+1;
+
+		$count_info++;
+		$ratio = sprintf("%.03f",$ratio);
+		#print "$chr1\t$i\t$count_info\t$div_in\t$cvg_in\t$div_out\t$cvg_out\t$ratio\t$ctl_out\n";
+
+		if ($ratio > $ratio_cut) {
+			print "$chr1\t$i\t$count_info\t$div_in\t$cvg_in\t$div_out\t$cvg_out\t$ratio\t$ctl_out\n";
+			&check_gff;
+			}
+
+                # make line plot
+		#&TkLine($x_old,$y_old,$x1,$y1,'orange');
+		$fill = "magenta";
+		&TkBox($x1,$y1,$x2,$y2,$fill,$fill);
+
+		}
+        }
+
+
+# print list of conserved genes to outfile
+$out_gene = "$ARGV[0]\_conserved_genes_Bgs\n";
+if ($outgroups ==1) {
+	$out_gene = "$ARGV[0]\_conserved_genes_ISR211\n";
+	}
+
+open(OUTGEN,">$$out_gene");
+print "$gene_DE\n";
+print OUTGEN "$gene_DE\n";
+close(OUTGEN);
+print "wrote $out_gene\n";
+
+# make y axis for sequence divergence
+# only show up to 3% 
+$x1 = $x_base;
+$x2 = $x1-5;
+$end_scale = 140/$plot_zoom;
+
+# make label
+$y1 = $y_base+($count_file+2)*$chr_dist;
+$lab = "Avg. sequence\ndivergence [%]";
+&TkText($x1-80,$y1,$lab,'ne','black',$font);
+
+$y1 = $y_base+($count_file+2)*$chr_dist+50;
+$lab = "B.g. tritici";
+&TkText($x1-80,$y1,$lab,'ne','red',$font);
+
+$y1 = $y_base+($count_file+2)*$chr_dist+70;
+$lab = "B.g. secalis\nB.g. dicocci";
+&TkText($x1-80,$y1,$lab,'ne','gray60',$font);
+
+
+
+for($i=0;$i<=$end_scale;$i+=1) {
+	$y1 = $y_base+($count_file+2)*$chr_dist+$plot_zoom*$i;
+
+	&TkLine($x1,$y1,$x2,$y1);
+
+	$lab = sprintf("%.01f",$i);
+	$lab .= " %";
+
+	&TkText($x2-5,$y1,$lab,'e');
+
+	}
+
+
+# make y axis for divergence ratio
+# only show up to 3% 
+$x1 = $x_base;
+$x2 = $x1-5;
+
+# make label
+$lab = "Ratio divergence\nB.g. tritici/B.g. secalis\nB.g. tritici/B.g. dicocci";
+$y1 = $y_base+($count_file+10)*$chr_dist;
+&TkText($x1-80,$y1,$lab,'ne','black',$font);
+
+for($i=0;$i<=50;$i+=5) {
+        $y1 = $y_base+($count_file+13)*$chr_dist-3*$i;
+        &TkLine($x1,$y1,$x2,$y1);
+        &TkText($x2-5,$y1,$i,'e');
+
+        }
+
+
+
+
+
+
+
+
+sub check_gff {
+
+foreach $gene (@gff) {	
+
+	$gene_pos = $gene_pos{$gene};
+	$fam = $fam{$gene};
+	#print "$gene\t$gene_pos\t$fam\t$i\n";
+	if (($gene_pos >= ($i-1000)) && ($gene_pos <= ($i+50000)))  {
+
+		unless ($gene ~~ @gene_collect) {
+			push(@gene_collect,$gene);
+			if ($fam eq '') {
+				$fam = "NA";
+				}
+			$gene_DE .= "$gene_pos\t$gene\t$fam\tR=$ratio\n";
+			}
+
+			#$rem .= "$gene $gene_pos $fam\n";
+		#print "$i\t$ratio\t$gene\t$gene_pos\t$fam\n";
+		}
+	}
+}
+
+
+
+
+# display sequence identity across user-defined windows for chromosome
+sub display_chr {
+
+print "entries: $count_all\t==> keep $count\n";
+
+$temp_fract = 0;
+
+# loop through array and calc divergence in sliding window
+@age_collect = ();
+for($i=0;$i<($count-$window);$i++) {
+
+        # calc divergnece over window
+        $len_aln = 0;
+        $ti = 0;
+        $tv = 0;
+        $pos1 = $all[$i][0];
+        $pos2 = $all[$i][1];
+
+        for($j=$i;$j<($i+$window);$j++) {
+                $len_aln += $all[$j][2];
+                $ti += $all[$j][3];
+                $tv += $all[$j][4];
+                }
+
+	# calculate divergence time 	
+	#(@date) = &seq2date($len_aln,$ti,$tv);
+        $date = (int($date[0]/1000))/1000;
+        $std = (int($date[1]/1000))/1000;
+
+
+	# calc sequence diversity
+	$snp = $ti+$tv;
+	$div = $snp/$len_aln*100;
+	$div = sprintf("%.03f",$div);
+
+	# add identity to diversity array
+	$kb = int($pos1/1000);
+
+	# for in-group
+	if ($group eq 'IN') {
+		$divg_in[$kb][0]+=$div;
+		$divg_in[$kb][1]++; # add cvg
+		$divg_in[$kb][2] .= " $div";
+		}
+
+	# for outgroup
+        if ($group eq 'OUT') {
+                $divg_out[$kb][0]+=$div;
+                $divg_out[$kb][1]++; # add cvg
+		$divg_out[$kb][2] .= " $div";
+		#print "$chr1\t$i\t$divg_out[$kb][1]\t$divg_out[$kb][0]\n";
+                }
+
+        # plot number of SNPs as colored lines
+	# ...only show a fraction of the lines (to save time)
+	
+	if ($temp_fract >= $fract) {
+
+        	$x1 = $x_base+int($pos1/$x_zoom);
+        	$x2 = $x_base+int($pos2/$x_zoom);
+
+        	# color lines based on age
+        	$val = int($date*$color_scale);
+
+		# make sqrt color gradient if box is checked
+		if ($sqrt_color ==1) {
+			$val = int((sqrt($div))*$color_scale);
+			}
+
+		if ($val > 38) {
+                        $val = 38;
+                        }
+
+        	$fill = $heat[$val];
+
+		# display colinearity plot with absolute position on individual chromosomes
+		if ($simple ==0) {
+                	&TkLine($x1,$y1,$x2,$y2,$fill);
+			} 
+		# ... or just simple vertical line (reference based)
+		if ($simple ==1) {
+                        &TkLine($x1,$y1,$x1,$y2,$fill);
+                        }
+
+                $temp_fract = 0;
+		#print "$chr1\t$chr2\t$pos1\t$pos2\t$x1\t$y1\t$len_aln\t$ti\t$tv\t$date\t$fill\n";
+		print "$chr1\t$chr2\t$pos1\t$pos2\t$len_aln\t$snp\t$div%\t$val\n";
+                }
+        $temp_fract++;
+
+        }
+
+}
+
+
+
+# make color scale for divergence
+$x1 = $x_base -300;
+$x2 = $x1+20;
+$x3 = $x1+30;
+$step = 0.01;
+
+# make header for dating or sequence divergence
+$lab = "Sequence\ndiversity[%]";
+
+$y1 = $y_base-20;
+&TkText($x1,$y1,$lab,'nw');
+
+$step = 4;	
+$box_y = 15/$step;
+AGE:for($i=0;$i<40;$i+=$step) {
+
+	$y1 = $y_base+20+$i*$box_y;
+	$y2 = $y1+13;
+
+	$fill = $heat[$i];
+
+	$val = ($i/$color_scale)*($i/$color_scale);
+
+	$lab = sprintf("%.04f",$val);
+
+
+	&TkBox($x1,$y1,$x2,$y2,$fill,'black');
+	&TkText($x3,$y1,$lab,'nw');
+
+	}
+
+# add last box
+$lab = ">$lab";	
+$y1 = $y_base+20+($i)*$box_y;
+$y2 = $y1+13;
+$fill = $heat[$i+1];
+&TkBox($x1,$y1,$x2,$y2,$fill,'black');
+&TkText($x3,$y1,$lab,'nw');
+
+
+$canvas -> configure (-scrollregion => [$canvas -> bbox("all")]);
+
+} # end display annotation -------------------------------------------------
+
+
+# make array with 48 colors in hexadec code
+sub mk_heat {
+
+@heat = ();
+
+for($i=0;$i<48;$i++) {
+
+        # calculate color code in hexadec system +++++
+        $modulo = $i%16;
+        $integer = int($i/16);
+        $hexval = sprintf("%x", $modulo);
+        $hexval =~ tr/a-z/A-Z/;
+
+        if ($integer == 0) {
+        $red = "$hexval$hexval";
+        $green = "00";
+        $blue = "00";
+        }
+
+        if ($integer == 1) {
+        $red = "FF";
+        $green = "$hexval$hexval";
+        $blue = "00";
+        }
+
+        if ($integer == 2) {
+        $red =  "FF";
+        $green = "FF";
+        $blue = "$hexval$hexval";
+        }
+
+        $color = "#$red$green$blue";
+
+        if ($integer == 3) {
+        $color = "#FFFFFF";
+        }
+
+        #print "i=$i\tint = $integer\tmod = $modulo\tcolor = $color\n";
+
+        push(@heat,$color);
+        }
+}
+
+
+
+
+
+
+# make ifull color spectrum in hexadec code
+sub mk_color_spec {
+
+@hexa = ();
+
+for($i=0;$i<112;$i++) {
+
+        # calculate color code in hexadec system +++++
+
+        $modulo = $i%16;
+	$down = 15-$modulo;
+        $integer = int($i/16);
+        $hexval = sprintf("%x", $modulo);
+        $hexval =~ tr/a-z/A-Z/;
+	$hexval2 = sprintf("%x", $down);
+	$hexval2 =~ tr/a-z/A-Z/;
+
+	# go from black to red
+        if ($integer == 0) {
+        $red = "$hexval$hexval";
+        $green = "00";
+        $blue = "00";
+        }
+
+        # go from red to yellow	
+        if ($integer == 1) {
+        $red = "FF";
+        $green = "$hexval$hexval";
+        $blue = "00";
+        }
+
+        # go from yellow to green 
+        if ($integer == 2) {
+        $red = "$hexval2$hexval2";
+        $green = "FF";
+        $blue = "00";
+        }	
+
+        # go from green to turquoise
+        if ($integer == 3) {
+        $red = "00";
+        $green = "FF";
+        $blue = "$hexval$hexval";
+        }
+
+	# go from turquoise to blue
+        if ($integer == 4) {
+        $red =  "00";
+        $green = "$hexval2$hexval2";
+        $blue = "FF";
+        }
+
+        # go from blue to purple
+        if ($integer == 5) {
+        $red =  "$hexval$hexval";
+        $green = "00";
+        $blue = "FF";
+        }
+
+	# go from black to white
+        if ($integer == 6) {
+        $red =  "$hexval$hexval";
+        $green = "$hexval$hexval";
+        $blue = "$hexval$hexval";
+        }
+
+
+	$color = "#$red$green$blue";
+
+        #print "i=$i\tint = $integer\thexval = $hexval\tdown = $hexval2\tcolor = $color\n";
+
+        push(@hexa,$color);
+        }
+
+} 
+
+
+
+
+
+
+# subroutine save postscript ++++++++++++++++++++++++++++++
+
+sub write_ps {
+
+&write_ps_to_jpg($ps_name);
+
+                                                                                
+} # end save postscript -----------------------------------
+
+
+
+
+
+# subroutine print screen +++++++++++++++++++++++++++++++++
+
+sub print_landscape {
+
+$ps_out = "print.ps";
+
+$canvas -> postscript(
+        -file, "$ps_out",
+        -rotate,1,
+        -pageheight, '500',
+        -pagewidth, '750'
+        );
+
+`lp $ps_out`;
+#`rm $ps_out`;
+
+} # end print screen -------------------------------------
+
+
+
