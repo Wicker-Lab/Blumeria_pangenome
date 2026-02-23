@@ -1,0 +1,242 @@
+#!/usr/bin/perl
+
+use lib '/home/wicker/data/WICKERsoft/';
+use Biomodule;
+
+if (@ARGV < 2) {
+	print "1.= output from blast_bi_directional_form_db_list\n";
+	print "2.= table with DE lines for all isolates\n";
+	print ">=3. isolates to ignore (optional)\n";
+	exit;
+	}
+
+# get DE lines from all islates ++++++++++++++++++++++++
+$infile = $ARGV[0];
+
+open (IN, "$ARGV[1]");
+while (<IN>){
+        ($p) = /^(\S.+)$/;
+        if ($p) {
+                @data = split('\t',$p);
+
+                $id = $data[0];
+                $ch = $data[1];
+                $be = $data[2];
+		$en = $data[3];
+		$tag = $data[4];
+		$DE = $data[5];
+               
+	       	$ch =~ s/^\S+chr-//;
+
+                $DE{$id} = $DE;
+                $tag{$id} = $tag;
+                $count_DE++;
+                $chr{$id} = $ch;
+                $pos{$id} = $be;
+		
+                if ($count_DE < 10) {
+                        print "$id\t$tag2\t$DE\n";
+                        }
+
+                }
+        $first =0;
+        }
+close(IN);
+
+
+# make list of isolates to be ignored
+@ignore = ();
+for($i=2;$i<@ARGV;$i++) {
+        push(@ignore,$ARGV[$i]);
+        }
+
+$ignore_tag = '';
+if (@ignore > 0) {
+        $ignore = join(' ',@ignore);
+        $ignore_tag = join('_',@ignore);
+        $ignore_tag = "_excl_$ignore_tag";
+        }
+
+print "outgroups: $ignore\n";
+
+
+# extract header from bi-directional hit file +++++++++++++++++++++++++
+print "\nextract isolate names from header from $infile\n";
+$first = 1;
+open (IN, "$infile");
+BIDI:while (<IN>){
+
+        # extract header ++++++++++++++++++++   
+        ($p) = /^(\S.+)$/;
+        if (($p) && ($first ==1)) {
+
+                $p =~ s/\s+/ /g;
+                @iso = split(' ',$p);
+                $count_iso = @iso;
+
+                # identify column to ignore
+                @ign_col = ();
+                @use_col = ();
+                for($i=0;$i<@iso;$i++) {
+                        $rem = '';
+                        $iso = $iso[$i];
+                        if ($ignore =~ /$iso/) {
+                                $rem = "\tEXCLUDE";
+                                push(@ign_col,$i);
+                                } else {
+                                push(@use_col,$i);
+                                }
+
+                        print "ISO $i\t$iso[$i]\t$rem\n";
+                        }
+
+                # define minimal number of isolates required for hard-core genome
+                $iso_count = @iso;
+                }
+        last(BIDI);
+        }
+close(IN);
+
+print "\nisolates: @iso\n";
+print "columns to ignore: @ign_col\n";
+print "columns to use:    @use_col\n";
+print "isolates to use:   @use_iso\n\n";
+
+# make header for all PAP outfiles
+$head =  "id\ttag\tpresent\tabsent";
+for($i=0;$i<@use_col;$i++) {
+        $col = $use_col[$i];
+        $head .= "\t$iso[$col]";
+        }
+
+
+# make output with simple presenece/absence matrix for selected isolates
+$out1 = "$ARGV[0]\_PAP_matrix$ignore_tag";
+open(OUT1,">$out1");
+print OUT1 "$head\n";
+print  "$head\n";
+
+# make output with simple presenece/absence matrix for selected isolates for non-effectors
+$out2 = "$ARGV[0]\_PAP_matrix_non_Eff$ignore_tag";
+open(OUT2,">$out2");
+print OUT2 "$head\n";
+
+# make output with simple presenece/absence matrix for selected isolates for effectors
+$out3 = "$ARGV[0]\_PAP_matrix_Eff$ignore_tag";
+open(OUT3,">$out3");
+print OUT3 "$head\n";
+
+
+# extract data from  bi-directional hit file +++++++++++++++++++++++++
+$first = 1;
+open (IN, "$infile");
+while (<IN>){
+
+        ($p) = /^(\S.+)$/;
+        if (($p) && ($first ==0)) {
+
+                $p =~ s/\s+/ /g;
+                @data = split(' ',$p);
+
+                $id = $data[0];
+
+                $tag = $tag{$id};
+                $DE = $DE{$id};
+                $pos = $pos{$id};
+                $chr = $chr{$id};
+
+                #print "\n$id\t$tag2\t$DE\t$_";
+                &process_gene;
+                $count_gene++;
+
+                }
+
+        $first = 0;
+        }
+# end loop over main file -----------------
+
+# show conserved counts for all isolates
+print "\nconserved counts for all isolates:\n";
+for($i=0;$i<@use_col;$i++) {
+
+	$col = $use_col[$i];
+	$iso = $iso[$col];
+	$c = $cons_count[$i];
+	print "$i\t$c\t$iso\n";
+	}
+
+
+
+print "\nwrote $out1\t$count_gene\n";
+print "wrote $out2\t$count_non\n";
+print "wrote $out3\t$count_eff\n";
+
+
+
+
+
+exit;
+
+
+# extract selected columns, make 0/1 matrix
+# write all, non-eff and eff gene lines
+sub process_gene {
+
+$count_present = 0;
+$count_absent = 0;	
+@PAP = ();
+@absent = ();
+@present = ();
+
+# check if gene is present, ignore extcluded isolates
+for($i=0;$i<@use_col;$i++) {
+
+        $col = $use_col[$i];
+	$iso = $iso[$col];
+
+	#print "check $i\t$col\t$iso\t$data[$col]\n";
+
+        if ($data[$col] ne 'NA') {
+                $count_present++;
+		$cons_count[$i]++;
+                push(@present,$col);
+                push(@PAP,1);
+                }
+        if ($data[$col] eq 'NA') {
+                $count_absent++;
+                push(@absent,$col);
+                push(@PAP,0);
+                }
+
+        }
+
+$line = "$id\t$tag\t$count_present\t$count_absent";
+for($i=0;$i<@PAP;$i++) {
+	$line .= "\t$PAP[$i]";
+	}
+
+#print "L=$line\n";
+
+print OUT1 "$line\n";
+
+if ($tag =~ /^E/) {
+	print OUT3 "$line\n";
+	$count_eff++;
+	} else {
+	print OUT2 "$line\n";
+	$count_non++;
+	}	
+
+
+}	
+	
+
+
+
+
+
+
+
+
+
+

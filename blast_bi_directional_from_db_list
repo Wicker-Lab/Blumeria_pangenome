@@ -1,0 +1,317 @@
+#!/usr/bin/perl
+
+use lib '/home/wicker/data/WICKERsoft/';
+use Biomodule;
+
+`cp /home/wicker/data/WICKERsoft/BLOSUM62 .`;
+
+if (@ARGV < 2) {
+	print "1.arg = db list with refseq at pos 1\n";
+	print "2.arg = blast program\n";
+	print "e-value cutoff is set to 10E-20 for protein and 10E-20 for DNA\n";
+	exit;
+	}
+
+$db_dir  = "/home/wicker/data/databases/blast_databases/";	
+$blast = $ARGV[1];
+$E_min = 20;
+
+
+
+# make list of genomes ++++++++++++++++++++++++
+open(IN,"$ARGV[0]");
+while(<IN>) {
+	($db) = /^(\S+)/;
+	if ($db) {
+		push(@db,$db);
+		($iso) = ($db =~ /^[^_]+_([^_]+)_/);
+		$iso{$db} = $iso;
+
+		&check_db;
+
+
+		}
+
+	}
+
+
+# +++++++++++++++++++++++++++++++++++++++	
+print "make pairs to compare:\n";
+
+for($i=1;$i<@db;$i++) {
+
+	$iso = $iso{$db[$i]};
+
+	$pair = "$db[0] $db[$i]";
+	push(@pairs,$pair);
+
+	print "$db[0]\t$db[$i]\t$iso\n";
+
+	}
+
+
+	
+# make initial gene list from reference flat file
+$log = "homologs_bi_directional";
+open(LOG,">$log");
+
+$db = $db[0];
+$iso = $iso{$db};
+
+print LOG "$iso\n";
+
+@genes = ();
+$count_gene =0;
+
+open(IN,"$db");
+while(<IN>) {
+        ($id) = /^>(\S+)/;
+        if ($id) {
+                push(@genes,$id);
+		$count_gene++;
+		print LOG "$id\n";
+		($chr,$be,$en) = /chr-(\d+)\s+(\d+)\s+(\d+)/;
+		print POS "$chr\t$be\t$en\n";
+
+                }
+
+        }
+close(IN);
+close(LOG);
+
+print "genes in reference: $count_gene\n";
+print "wrote initial $log\n";
+
+
+
+# run blasts ++++++++++++++++++++++++
+for($i=0;$i<@pairs;$i++) {
+
+	($db1,$db2) = ($pairs[$i] =~ /^(\S+)\s+(\S+)/);
+	
+	print "blast $db1\t$db2\n";
+
+	$iso2 = $iso{$db2};
+
+	# initiate bi-di hit hash
+	%bi_di = ();
+	foreach $gene (@genes) {
+		$bi_di{$gene} = "NA";
+		}
+
+
+	# hash for genes with 1 vs 2 hits
+	%best_hit = ();
+	$hit_gene = '';# collect genes with hits for speed
+
+	# blast 1 vs 2
+	@blast_gene = ();
+	$query = $db1;
+	$db = $db2;
+	&run_blast;
+
+	@blast_gene1 = @blast_gene;
+
+
+	# blast 2 vs 1
+	@blast_gene = ();
+        $query = $db2;
+        $db = $db1;
+	&run_blast;
+
+	@blast_gene2 = @blast_gene;
+
+	&mk_bi_di_homologs;
+
+	# add new column to homolog collection
+	$log_cp = "$log\_cp";
+	`cp $log $log_cp`;
+
+	open(LOG,">$log");
+
+	$first = 1;
+	open(IN,"$log_cp");
+	while(<IN>) {
+
+		($id) = /^(\S+)/;
+		if (($id) && ($first ==0)) {
+			$best = $bi_di{$id};
+			$line = $_;
+			chomp($line);
+			print LOG "$line\t$best\n";
+			#print "$line\t$best\n";
+			}
+		if ($first ==1) {
+			$line = $_;
+			chomp($line);
+			print LOG "$line\t$iso2\n";
+			print "$line\t$iso2\n";
+			}
+		$first = 0;	
+		}
+	close(IN);
+	close(LOG);	
+
+	print "wrote $log_cp\t$log\n";
+
+	}
+
+`rm BLOSUM62`;
+
+
+exit;
+
+
+# identify bi-directional best homologs ++++++++++++++++
+sub mk_bi_di_homologs {
+
+foreach $gene1 (@blast_gene1) {
+
+	$best_1 = $best_hit{$gene1};
+	$bi_di_yes = 0;
+	$best_match = "NA";
+
+	foreach $gene2 (@blast_gene2) {
+
+		$best_2 = $best_hit{$gene2};
+		if (($gene2 eq $best_1) && ($gene1 eq $best_2)) {
+			#print "MATCH $gene2\t$best_2\n";
+			$bi_di_yes =1;
+			$best_match = $gene2;
+			}
+		}
+	
+	# make record for reference gene table 	
+	$bi_di{$gene1} = $best_match; 
+
+	print "test $gene1\t$best_1\n";
+
+
+	}
+
+
+
+
+}
+
+
+
+
+# run blast of query against db  ++++++++++++++++++++++++ 
+sub run_blast {
+
+$seq = '';
+$count =0;
+
+open(IN,"<$query");
+while (<IN>) {
+
+	($go) = /^>(\S+)/;
+	if ($go) {
+		($de) = /^\S+\s+(\d+-\d+.+)$/;
+
+		if ($seq ne '') {
+			$hit_yes = 0;
+			$best_ID = '';
+			$q_len = length($seq);
+			$count++;
+			&flow_sort;
+
+			if ($hit_yes ==1) {
+				$best_hit{$name} = $best_ID;
+				}
+
+			print "blast $count\t$name\t$best_ID\n";
+
+			}
+
+		$DE = $de;
+		$seq = '';
+		$name = $go;
+		push(@blast_gene,$name);
+		}
+
+	($se) = /^([^>].+)$/;
+	if ($se) {
+		$seq .= $se;
+		}
+	}
+
+&flow_sort;
+close(IN);
+
+} # ------------------------------------------------
+
+
+
+
+
+# +++++++++++++++++++++++++++++++++++++++
+sub flow_sort {
+
+# make temp file for blast search
+($fasta) = &mk_fasta($seq);
+open(OUT,">$name");
+print OUT ">$name $DE\n$fasta\n";
+close (OUT);
+
+$best_ID = "NA";
+
+# run blast
+$out = "$name\.blastn";
+$blast_db = "/home/wicker/data/databases/blast_databases/$db";
+`blastall -p $blast -d $blast_db -i $name -F T -o $out`;
+
+(@test) = &parse_blast($out);
+
+# look at top hit +++++++++++++++++++++++++++++++++++++++++++
+($ID,$rem,$s_size) = ($test[0] =~ /ID=([^;]+);([^;]+);(\d+)/);
+(@data) = ($test[0] =~ /^(data=.+)$/gm);
+
+# just look at top alignment
+($Eval,$sim,$be1,$en1,$be2,$en2,$seq1,$seq2) = ($data[0] =~
+/data=[^;]+;([^;]+);([^;]+);([^;]+);([^;]+);([^;]+);([^;]+);([^;]+);([^;]+)/);
+
+$diff = abs($be1-$en1)+1;
+
+$pot = '';
+($pot) = ($Eval =~ /e-(\d+)/);
+
+if ($Eval eq '0.0') {
+        $pot = 100;
+        }
+
+if ($pot >= $E_min) {
+	$hit_yes = 1;
+	$best_ID = $ID;
+	} 
+
+`rm $out`;
+`rm $name`;
+
+}
+# end floe sort --------------------------------------
+
+
+
+
+
+# check if blast databases exist. if not, make them
+sub check_db {
+
+$db_file = "$db_dir$db\.ndb";
+$db_name = "$db_dir$db";
+
+if (-e $db_file) {
+	print "$db_file\tdb exists\n";
+	} else {
+	$db_chr = "$path$db";
+	print "$db_file\tDB MISSING ==> write new\n";
+	print "formatdb -i $db_chr -p F\n";
+	`formatdb -i $db_chr -p F`;
+	`mv $db_chr.* /home/wicker/data/databases/blast_databases/`;
+	}
+
+
+}
+

@@ -1,0 +1,217 @@
+#!/usr/bin/perl
+
+use lib '/home/wicker/data/WICKERsoft/';
+use Biomodule;
+
+
+if(@ARGV < 1) {
+	print "1.= homologs_bi_directional_PAP_matrix (output from eval_bi_directional_blast_hits_v2)\n";
+	print "2.= isolate to hilite (optional)\n";
+	exit;
+	}
+
+
+$infile = $ARGV[0];
+$hilite = $ARGV[1];
+
+$out = "$ARGV[0]\_permutations";
+open(OUT,">$out");
+print OUT "isolates\tpermutation\tcombo\tcore_genes\tGroup\ttag\n";
+
+# extract header from PAP file +++++++++++++++++++++++++
+print "\nextract isolate names from header from $infile\n";
+$first = 1;
+@iso = ();
+open (IN, "$infile");
+PAP:while (<IN>){
+
+        # extract header ++++++++++++++++++++   
+        ($p) = /^(\S.+)$/;
+        if (($p) && ($first ==1)) {
+
+                $p =~ s/\s+/ /g;
+                @data = split(' ',$p);
+	
+		# extraxt columns >4 with 0/1 data
+		$col_num = 0;
+		for($i=4;$i<@data;$i++) {
+			$iso = $data[$i];
+			push(@iso,$data[$i]);			
+			# tgg colum number with isolate name
+			$tag{$col_num} = $iso; 
+			print "$i\tcol=$col_num\t$iso\n";
+			$col_num++;
+			}
+                }
+	last(PAP);		
+	}
+close(IN);
+
+$count_iso = @iso;
+print "isolates\t$count_iso\t@iso\n";
+
+
+
+
+
+# extract data from  PAP file into 2D array +++++++++++++++++++++++++
+$first = 1;
+@all = ();
+$count = 0;
+open (IN, "$infile");
+while (<IN>){
+
+	($p) = /^(\S.+)$/;
+	if (($p) && ($first ==0)) {
+
+		$p =~ s/\s+/ /g;
+		@data = split(' ',$p);
+
+		$column = 0;
+		for($i=4;$i<@data;$i++) {
+			$all[$count][$column] = $data[$i];
+			$column++;
+			}
+
+		$count++;
+
+		}
+
+	$first = 0;	
+	}
+# end loop over main file -----------------
+
+print "tot genes:\t$count\n";
+print "columns:\t$column\n";
+
+
+
+# loop over all iterations +++++++++++++++++++++++++++++++++++
+
+# make array of columns for recursive iterations
+@col = ();
+for($i=0;$i<$column;$i++) {
+	$col[$i] = $i;
+	}
+
+
+
+# loop over isolate numbers to calc core genome +++++++++++++++++++
+for($k = 1;$k<@col;$k++) {
+
+print "selected isolates: $k ++++++++++++++\n";
+
+@combo = ();
+&permute(\@col,$k,[]);
+
+# show list of permutations (just for control)
+#for($x=0;$x<@combo;$x++) {
+#        @col_test = split(' ',$combo[$x]);
+#        print "$x\t$combo[$x]\t==> test @col_test\n";
+#        }
+
+
+# loop over all permutations
+# calc core genome assessment for all column combinations	
+for($x=0;$x<@combo;$x++) {
+
+	# make array of selected columns
+	@col_test = split(' ',$combo[$x]);
+	$combo_tag = $combo[$x];
+
+	#check if combination contains Bgs_1459 
+	$group_tag = "excl_1459";
+	$tag2 = 1;
+	foreach $col_test (@col_test) {
+		$tag = $tag{$col_test};
+		if ($tag =~ /1459/) {
+			$group_tag = "incl_1459";
+			}
+		if ($tag =~ /$hilite/) {
+			$tag2=5;
+			}		
+		}
+	&get_core;
+	}
+
+}
+
+
+print "wrote $out\n";
+
+
+
+# recursive loop to generate all permutations ++++++++++++
+sub permute {
+    my ($nums, $k, $prefix) = @_;
+
+    if (@$prefix == $k) {
+	# get rid of redunancy, sort by numbers & check if combination is already present    
+	@tmp = @$prefix;
+	@tmp = sort{$a <=> $b} (@tmp);
+        #$combo = join('', @$prefix), "\n";
+	$combo = join(' ',@tmp);
+	# add combotation if it is not in collection yet
+	unless ($combo ~~ @combo) {
+		push(@combo,$combo);
+		}
+        #return;
+    }
+
+    for my $i (0 .. $#$nums) {
+        my @remaining = @$nums;
+        my $picked = splice(@remaining, $i, 1);
+        &permute(\@remaining, $k, [@$prefix, $picked]);
+    }
+}
+
+
+
+
+exit;
+
+
+
+# count core genes for selected columns
+sub get_core {
+
+$count_core = 0;
+
+# loop over all genes 
+for($d=0;$d<$count;$d++) {
+
+	$sum = 0;
+
+	# print line just for control
+	$line = $d;
+	for($l=0;$l<$column;$l++) {
+		$line .= "\t$all[$d][$l]";
+		}
+
+	# check selected isolates for gene presence	
+	for($c=0;$c<@col_test;$c++) {
+		$col = $col_test[$c];	
+		$sum += $all[$d][$col];
+		#print "$c\t$all[$d][$col]\t$sum\n";
+		}
+
+	#print "sum = $sum\n\n";	
+
+	# if sum 0/1 is equal isolates count to core genome
+	if ($sum == @col_test) {
+		$count_core ++;
+		}
+
+	#print "$line\tCORE = $count_core\n";
+
+	}
+
+print "$k\t$x\t$combo_tag\t$count_core\t$group_tag\t$tag2\n";
+print OUT "$k\t$x\t$combo_tag\t$count_core\t$group_tag\t$tag2\n";
+
+
+}
+
+
+
+
