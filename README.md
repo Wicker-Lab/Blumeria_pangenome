@@ -2,9 +2,9 @@
 scripts, explanantions and datasets used in the analysis of Blumeria graminis genomes
 
 Each directory contains R and/or Perl scripts that were used to produce the respective figure panels.
-The directories also contain the unput data used for the plots
+The directories also contain the input data used for the plots.
 
-For for analyses that were done using original Perl scripts, a separate README file is provided on how to use the scripts, also containing descriptions how the scripts work.
+For analyses that were done using original Perl scripts, a separate README file is provided on how to use the scripts, also containing descriptions how the scripts work and what they do.
 
 A few very large datasets used for some of the analyses could not be deposited here and can instead be found in our Zenodo repository (https://zenodo.org/records/14020735).
 These are:
