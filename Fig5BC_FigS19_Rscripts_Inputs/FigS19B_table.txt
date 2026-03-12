@@ -1,0 +1,6 @@
+	type	Duplications[%]	Deletions[%]
+all	All chr Non-effector	7.6%	17.3%
+all	All chr Effector	24.3%	29.9%
+chr11	Chr11 Non-effector	78.6%	28.6%
+chr11	Chr11 Effector	60.0%	50.0%
+
