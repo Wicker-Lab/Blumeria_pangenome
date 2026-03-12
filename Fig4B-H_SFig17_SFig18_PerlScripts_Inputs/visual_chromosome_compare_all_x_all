@@ -1,0 +1,619 @@
+#!/usr/bin/perl
+
+
+use lib '/home/wicker/data/WICKERsoft/';
+use Tk;
+use Biomodule;
+
+if (@ARGV <1) {
+	print "1.= query for outputs from blast_compare_aligne_chromosome)\n";
+	print "2.= -h (hard-code GUI size in case screen size is not detected correctly)\n";
+	exit;
+	}
+
+$chr_len = $ARGV[1];
+
+
+# +++++++++++++++++ PART I +++++++++++++++++++++++++++
+# this part defines the visual layout
+# this is all Tk specific stuff 
+
+
+
+# determine screen resolution +++++++++++++++++++++++++++++++++++
+`xrandr > resolution_table`;
+open (IN,"resolution_table");
+$line = <IN>;
+close(IN);
+`rm resolution_table`;
+
+
+($x_axis,$y_axis) = ($line =~ /current\s+(\d+)\s+x\s+(\d+),/);
+
+# use info to create main window +++++++++++++++++++++++++++++++++
+
+$x_frame = $x_axis-10;
+
+if ($x_frame > 2000) {
+	$x_frame /=2;
+	}
+$y_frame = $y_axis-70;
+
+# hard code size in case of bad dimension recognition
+if ($ARGV[1] eq '-h') {
+        $x_frame = 1900;
+        $y_frame = 1050;
+        }
+
+
+# create functional geometry variable
+$tempfr = "$x_frame x";
+$tempfr =~ s/ //;
+$geometry = "$tempfr$y_frame+10+0";
+print "geometry = $geometry\n";
+
+$mw = MainWindow -> new;
+$mw -> title ("WICKERsoft supersoftware");
+$mw -> geometry("$geometry");
+$buty = $y_frame-90;
+$canvas_x = $x_frame-40;
+
+
+# create canvas ++++++++++++++++++++++++++++++++++++
+
+$canvas = $mw -> Scrolled ('Canvas',
+        -scrollbars, 'se',
+        -width, $canvas_x,
+        -height, ($buty - 30),
+        -background, 'white',
+        ) -> place(-x => 10, -y => 10,);
+
+# loop to create buttons +++++++++++++++++++++++++++++
+
+# define arrays with labels and functions for buttons
+
+@buttons = ("process_file", "print", "exit", "write postscript");
+
+@b_comands = ("get_file", "print_landscape", "get_out", "write_ps");
+
+$b_count =0;
+$butx = 10;
+
+foreach (@buttons) {
+
+	$b_command = $b_comands[$b_count];
+	$b_text = $buttons[$b_count];
+
+	$mw -> Button (
+	        -text, "$b_text",
+	        -width, 17,
+		-pady, '-1',
+		-padx, '2',
+		# this exact format for the "-command" is obviously important:
+	        -command, \&$b_command
+	        ) -> place (-x => $butx, -y => $buty);
+
+	$b_count++;
+	$butx +=130;
+	&max_button;
+
+	} # end create buttons -------------------------
+
+
+
+
+# checks if buttons have to be moved to a new line
+
+sub max_button {
+if ($butx > ($x_frame-150)) {
+	$butx = 10;
+	$buty +=25;
+	}
+} # end max_button
+
+
+# loop to create check buttons ++++++++++++++++++++++++++++++++++++++++
+
+$butx +=20;
+&max_button;
+
+#@checkbutton = ("draw scale", "sequence heat map", "relative cvg");
+@cb_commands = qw(show_breaks);
+
+$show_breaks = 0;
+for ($b=0;$b<@cb_commands;$b++) {
+
+	$cb_command = $cb_commands[$b];
+	$cb_text = $cb_commands[$b];
+
+	$$cb_command=0;
+
+	if ($b<2){
+		$$cb_command=0;
+		}
+
+	$mw -> Checkbutton (
+		-text, "$cb_text",
+		-variable, \$$cb_command,
+		) -> place(-x => ($butx), -y => ($buty));
+	
+	$butx +=180;
+	&max_button;
+	} # end create ckeck buttons ----------------------------------
+
+
+
+# loop to create data entries +++++++++++++++++++++++++++++++++++++++++++
+
+@entry = qw(ps_name color_scale window x_zoom fract);
+
+$color_scale = 25;
+$window = 50;
+$x_zoom = 155000;
+$y_zoom = 20000;
+$fract = 10;
+$scale_unit = 1;
+$start_seq1 = 0;
+$start_seq2 = 0;
+$win_mb = 800;
+$scale_step = 0.2;
+
+$ps_name = "dot_$ARGV[0]";
+$ps_name =~ s/.tab//;
+
+
+for ($b=0;$b<@entry;$b++) {
+	
+	$label = $entry[$b];
+	$entry = $entry[$b];
+
+	$mw -> Label (
+		-text, "$label",
+		-width, 11,
+		) -> place (-x => ($butx+20), -y => $buty+5);
+
+	$mw -> Entry (
+		-textvariable, \$$entry,
+		-relief, 'sunken',
+		-background, 'white',
+		-width => 11, 
+		) -> place(-x => ($butx+120), -y => ($buty+3));
+
+	$butx +=200;
+	&max_button;
+	} # end create data entries --------------------------------------
+
+
+MainLoop;
+
+# +++++++++++++ PART II +++++++++++++++++++++++++++++++++
+# subroutines that are called by the buttons 
+
+
+# command routines for generic buttons ++++++++++++++++++
+
+sub get_out {
+	exit;
+	}
+
+sub get_file {
+&display;
+}
+
+sub zoom_in {
+$zoom = int($zoom/2);
+&display;
+}
+
+sub zoom_out {
+$zoom = int($zoom*2.5);
+&display;
+}
+
+
+
+# +++++++++++ main subroutine - display annotation ++++++++++++++++++++++++
+
+sub display {
+
+$canvas -> delete("all");
+
+
+# define base positions
+$y_base = 50;
+$x_base = 50;
+$font = "{arial 12}";
+$count_file =0;
+$chr_wide = 10;
+
+&mk_color_spec;
+&mk_heat;
+
+# get names and sizes of all chromosomes from logs
+%len = ();
+@chr = ();
+
+foreach $file (<*$ARGV[0]*.tab>) {
+
+	print "process $file\n";
+
+	open (IN,"$file");
+	TAB:while (<IN>) {
+		($c1,$l1,$c2,$l2) = /CHR1=(\S+)\s+LEN1=(\d+)\s+CHR2=(\S+)\s+LEN2=(\d+)/;
+		if ($c1) {
+			unless ($c1 ~~ @chr) {
+				push(@chr,$c1);
+				$len{$c1} = $l1;
+				}
+
+			unless ($c2 ~~ @chr) {
+                                push(@chr,$c2);
+                                $len{$c2} = $l2;
+                                }
+			last TAB;	
+			}
+
+		}
+	close(IN);	
+	}
+
+
+# calculate and memorize cumulative positions to use
+$cum1 = 0;
+$cum2 = 0;
+foreach $chr (@chr) {
+	$len = $len{$chr};
+	$cum1{$chr} = $cum1;
+	$cum2 += $len;
+	$cum2{$chr} = $cum2;
+	print "$chr\t$len\t$cum1\t$cum2\n";
+	$cum1 += $len;	
+	}
+
+$max_pos = $cum2;
+
+# make all x all matrix
+$count_chr = @chr;
+
+for($i=0;$i<@chr;$i++) {
+
+	$chr1 = $chr[$i];
+	$cum1 = $cum1{$chr1}; 
+	$cum2 = $cum2{$chr1};
+
+	$lab = $chr1;
+	$lab =~ s/_chr\d+//;
+
+	print "LAB: $chr1\t$cum1\t$cum2\n";
+
+	# make x label
+	$x1 = $x_base + int($cum1/$x_zoom);
+	$y1 = $y_base;
+	$y2 = $y1-5;
+	&TkText($x1,$y2,$lab,'sw');
+
+	# make x grid
+	$y3 = $y_base + int($max_pos/$x_zoom);
+	&TkLine($x1,$y1,$x1,$y3);
+
+
+	# make y label
+        $x1 = $x_base;
+	$x2 = $x1 -5;
+        $y1 = $y_base + int($cum1/$x_zoom);
+        $y2 = $y1-5;
+        &TkText($x2,$y1,$lab,'ne');
+
+        # make x grid
+        $x3 = $x_base + int($max_pos/$x_zoom);
+        &TkLine($x1,$y1,$x3,$y1);
+
+	}
+
+
+# loop over files
+foreach $file (<*$ARGV[0]*.tab>) {
+
+        print "process $file\n";
+	$first = 1;
+	@all = ();
+	$count_all = 0;
+	$count = 0;
+
+        open (IN,"$file");
+        TAB:while (<IN>) {
+
+
+		# get chromosome names and cumulative positions
+                ($c1,$c2) = /CHR1=(\S+)\s+LEN1=\d+\s+CHR2=(\S+)\s+LEN2=(\d+)/;
+                if (($c1) && ($first ==1)) {
+			$chr1 = $c1;
+			$chr2 = $c2;
+			# get positions to add
+			$cum1 = $cum1{$chr1};
+			$cum2 = $cum1{$chr2};
+			print "$chr1\t$chr2\t$cum1\t$cum2\n";
+			}
+		
+		# get pair data	++++++++++++++++++++++++++
+		($p1) = /^(\S.+)/;
+        	if (($p1) && ($first ==0)) {
+
+                	$count_all++;
+
+                	@data = split('\t',$p1);
+
+                	($chr) = ($data[0] =~ /^(\S+chr\S+)_X_/);
+
+                	# only keep entries where positions dont differ by >10%
+                	$abs_dist = abs($data[1]-$data[2]);
+                	if ($data[1] > 0) {
+                	        $rel_dist = $abs_dist/$data[1];
+                	        } else {
+                	        $rel_dist = 100;
+				#print "WARNING: $count\t$data[1]-$data[2]\n";
+                	        }
+
+                	if ($rel_dist < 0.25) {
+                	        $all[$count][0] = $data[1]; # pos chr 1
+                	        $all[$count][1] = $data[2]; # pos chr 2
+                	        $all[$count][2] = $data[6]; # aligned bp        
+                	        $all[$count][3] = $data[7]; # TI
+                	        $all[$count][4] = $data[8]; # TV
+                	        $count++;
+                	        } else {
+				#print "DISCARD: $data[1]\t$data[2]\t$data[6]\t$data[7]\t$data[8]\n";
+                	        }
+
+			if ($count > 5000) {
+				#	last TAB;
+				}
+                	}
+
+		$first = 0;
+
+                }
+        close(IN);
+
+	&display_chr;
+
+        }
+
+
+
+sub display_chr {
+
+print "entries: $count_all\t==> keep $count\n";
+
+$temp_fract = 0;
+
+# loop through array and calc divergence in sliding window
+@age_collect = ();
+for($i=0;$i<($count-$window);$i++) {
+
+        # calc divergnece over window
+        $len_aln = 0;
+        $ti = 0;
+        $tv = 0;
+        $pos1 = $all[$i][0]+$cum1;
+        $pos2 = $all[$i][1]+$cum2;
+
+        for($j=$i;$j<($i+$window);$j++) {
+                $len_aln += $all[$j][2];
+                $ti += $all[$j][3];
+                $tv += $all[$j][4];
+                }
+
+        # exclude centromere if values are given
+
+
+        (@date) = &seq2date($len_aln,$ti,$tv);
+        $date = (int($date[0]/1000))/1000;
+        $std = (int($date[1]/1000))/1000;
+
+        # plot positions of the 2 chromosomes in 2D matrix
+	# ...only show a fraction of the lines
+	
+	if ($temp_fract >= $fract) {
+
+        	$x1 = $x_base+int($pos1/$x_zoom);
+        	$y1 = $y_base+int($pos2/$x_zoom);
+        	$x2 = $x1+1;
+        	$y2 = $y1+1;
+
+        	# color lines based on age
+        	$val = int($date*$color_scale);
+        	if ($val > 38) {
+        	        $val = 38;
+        	        }
+        	$fill = $heat[$val];
+
+                &TkLine($x1,$y1,$x2,$y2,$fill);
+		&TkBox($x1,$y1,$x2,$y2,$fill,$fill);
+
+		#also display the reciprocal
+		&TkBox($y1,$x1,$y2,$x2,$fill,$fill);
+
+
+                $temp_fract = 0;
+		#print "$chr1\t$chr2\t$pos1\t$pos2\t$x1\t$y1\t$len_aln\t$ti\t$tv\t$date\t$fill\n";
+                }
+        $temp_fract++;
+
+        }
+
+}
+
+
+
+
+
+
+
+$canvas -> configure (-scrollregion => [$canvas -> bbox("all")]);
+
+} # end display annotation -------------------------------------------------
+
+
+# make array with 48 colors in hexadec code
+sub mk_heat {
+
+@heat = ();
+
+for($i=0;$i<48;$i++) {
+
+        # calculate color code in hexadec system +++++
+        $modulo = $i%16;
+        $integer = int($i/16);
+        $hexval = sprintf("%x", $modulo);
+        $hexval =~ tr/a-z/A-Z/;
+
+        if ($integer == 0) {
+        $red = "$hexval$hexval";
+        $green = "00";
+        $blue = "00";
+        }
+
+        if ($integer == 1) {
+        $red = "FF";
+        $green = "$hexval$hexval";
+        $blue = "00";
+        }
+
+        if ($integer == 2) {
+        $red =  "FF";
+        $green = "FF";
+        $blue = "$hexval$hexval";
+        }
+
+        $color = "#$red$green$blue";
+
+        if ($integer == 3) {
+        $color = "#FFFFFF";
+        }
+
+        #print "i=$i\tint = $integer\tmod = $modulo\tcolor = $color\n";
+
+        push(@heat,$color);
+        }
+}
+
+
+
+
+
+
+# make ifull color spectrum in hexadec code
+sub mk_color_spec {
+
+@hexa = ();
+
+for($i=0;$i<112;$i++) {
+
+        # calculate color code in hexadec system +++++
+
+        $modulo = $i%16;
+	$down = 15-$modulo;
+        $integer = int($i/16);
+        $hexval = sprintf("%x", $modulo);
+        $hexval =~ tr/a-z/A-Z/;
+	$hexval2 = sprintf("%x", $down);
+	$hexval2 =~ tr/a-z/A-Z/;
+
+	# go from black to red
+        if ($integer == 0) {
+        $red = "$hexval$hexval";
+        $green = "00";
+        $blue = "00";
+        }
+
+        # go from red to yellow	
+        if ($integer == 1) {
+        $red = "FF";
+        $green = "$hexval$hexval";
+        $blue = "00";
+        }
+
+        # go from yellow to green 
+        if ($integer == 2) {
+        $red = "$hexval2$hexval2";
+        $green = "FF";
+        $blue = "00";
+        }	
+
+        # go from green to turquoise
+        if ($integer == 3) {
+        $red = "00";
+        $green = "FF";
+        $blue = "$hexval$hexval";
+        }
+
+	# go from turquoise to blue
+        if ($integer == 4) {
+        $red =  "00";
+        $green = "$hexval2$hexval2";
+        $blue = "FF";
+        }
+
+        # go from blue to purple
+        if ($integer == 5) {
+        $red =  "$hexval$hexval";
+        $green = "00";
+        $blue = "FF";
+        }
+
+	# go from black to white
+        if ($integer == 6) {
+        $red =  "$hexval$hexval";
+        $green = "$hexval$hexval";
+        $blue = "$hexval$hexval";
+        }
+
+
+	$color = "#$red$green$blue";
+
+        #print "i=$i\tint = $integer\thexval = $hexval\tdown = $hexval2\tcolor = $color\n";
+
+        push(@hexa,$color);
+        }
+
+} 
+
+
+
+
+
+
+# subroutine save postscript ++++++++++++++++++++++++++++++
+
+sub write_ps {
+
+&write_ps_to_jpg($ps_name);
+
+                                                                                
+} # end save postscript -----------------------------------
+
+
+
+
+
+# subroutine print screen +++++++++++++++++++++++++++++++++
+
+sub print_landscape {
+
+$ps_out = "print.ps";
+
+$canvas -> postscript(
+        -file, "$ps_out",
+        -rotate,1,
+        -pageheight, '500',
+        -pagewidth, '750'
+        );
+
+`lp $ps_out`;
+#`rm $ps_out`;
+
+} # end print screen -------------------------------------
+
+
+
