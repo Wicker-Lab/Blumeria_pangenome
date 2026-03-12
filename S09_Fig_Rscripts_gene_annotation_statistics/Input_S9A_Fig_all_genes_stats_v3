@@ -1,0 +1,34 @@
+Isolate_CDS	Gene_Number	Type
+Bgtl_THUN_12_CDS_v1_2	7092	Non-Effectors
+Bgs_1459_CDS	9051	Non-Effectors
+Bgt_ISR_211_CDS	9454	Non-Effectors
+Bgt_ISR_7_CDS_v1_4	9227	Non-Effectors
+Bgt_IRN_GOR_2_CDS	9195	Non-Effectors
+Bgt_CHN_17_40_CDS	9195	Non-Effectors
+Bgt_CHN_52_27_CDS	9248	Non-Effectors
+Bgt_JPN_CHIKA_CDS	9239	Non-Effectors
+Bgt_USA_2_CDS	9219	Non-Effectors
+Bgt_ARG_4_2_CDS	9312	Non-Effectors
+Bgt_CHE_96224_v4_23_CDS	7737	Non-Effectors
+Bgtl_THUN_12_CDS_v1_2	879	Grouped Eff
+Bgs_1459_CDS	757	Grouped Eff
+Bgt_ISR_211_CDS	884	Grouped Eff
+Bgt_ISR_7_CDS_v1_4	882	Grouped Eff
+Bgt_IRN_GOR_2_CDS	896	Grouped Eff
+Bgt_CHN_17_40_CDS	891	Grouped Eff
+Bgt_CHN_52_27_CDS	906	Grouped Eff
+Bgt_JPN_CHIKA_CDS	906	Grouped Eff
+Bgt_USA_2_CDS	906	Grouped Eff
+Bgt_ARG_4_2_CDS	899	Grouped Eff
+Bgt_CHE_96224_v4_23_CDS	843	Grouped Eff
+Bgtl_THUN_12_CDS_v1_2	22	Ungrouped Eff
+Bgs_1459_CDS	35	Ungrouped Eff
+Bgt_ISR_211_CDS	19	Ungrouped Eff
+Bgt_ISR_7_CDS_v1_4	13	Ungrouped Eff
+Bgt_IRN_GOR_2_CDS	17	Ungrouped Eff
+Bgt_CHN_17_40_CDS	16	Ungrouped Eff
+Bgt_CHN_52_27_CDS	16	Ungrouped Eff
+Bgt_JPN_CHIKA_CDS	14	Ungrouped Eff
+Bgt_USA_2_CDS	16	Ungrouped Eff
+Bgt_ARG_4_2_CDS	15	Ungrouped Eff
+Bgt_CHE_96224_v4_23_CDS	0	Ungrouped Eff
